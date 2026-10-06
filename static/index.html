@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Voice agent</title>
+  <style>
+    body { font-family: sans-serif; max-width: 36rem; margin: 2rem auto; }
+    button { font-size: 1rem; padding: 0.5rem 1rem; }
+    pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Voice agent</h1>
+  <p>Click talk, speak, then stop. Keep the same session id across turns.</p>
+  <p><label>Session <input id="session" value="demo-1" /></label></p>
+  <p>
+    <button id="start">Talk</button>
+    <button id="stop" disabled>Stop</button>
+  </p>
+  <pre id="log">Ready.</pre>
+  <audio id="player" controls></audio>
+  <script>
+    const logEl = document.getElementById("log");
+    const log = (msg) => { logEl.textContent = msg; };
+    let recorder, chunks = [];
+
+    document.getElementById("start").onclick = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        chunks = [];
+        recorder = new MediaRecorder(stream);
+        recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        recorder.start();
+        document.getElementById("start").disabled = true;
+        document.getElementById("stop").disabled = false;
+        log("Recording…");
+      } catch (err) {
+        log("Microphone error: " + err.message);
+      }
+    };
+
+    document.getElementById("stop").onclick = () => {
+      if (!recorder || recorder.state === "inactive") return;
+      recorder.onstop = async () => {
+        recorder.stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const form = new FormData();
+        form.append("audio", blob, "turn.webm");
+        form.append("session_id", document.getElementById("session").value);
+        log("Thinking…");
+        try {
+          const res = await fetch("/voice", { method: "POST", body: form });
+          const data = await res.json();
+          if (!res.ok) { log(data.detail || "Request failed"); return; }
+          log("You: " + data.transcript + "\nAgent: " + data.reply);
+          const player = document.getElementById("player");
+          player.src = "data:audio/mpeg;base64," + data.audio_base64;
+          player.play();
+        } catch (err) {
+          log("Network error: " + err.message);
+        } finally {
+          document.getElementById("start").disabled = false;
+          document.getElementById("stop").disabled = true;
+        }
+      };
+      recorder.stop();
+    };
+  </script>
+</body>
+</html>
